@@ -50,11 +50,15 @@ label {
   font-size: 0.875rem;
 }
 
-input {
+input,
+select {
   padding: 0.5rem 0.65rem;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   min-width: 140px;
+  font-size: 0.9rem;
+  background: #fff;
+  color: inherit;
 }
 
 button {
@@ -133,4 +137,27 @@ td {
 .user {
   font-size: 0.875rem;
   color: #475569;
+}
+
+.inline-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.inline-edit input {
+  min-width: 90px;
+}
+
+.inline-edit .unit {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.rules {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #334155;
+  font-size: 0.9rem;
+  line-height: 1.9;
 }

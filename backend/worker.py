@@ -1,4 +1,8 @@
-"""后台工人：用 SKIP LOCKED 认领 pending 读数并写入合格/超温结论。"""
+"""后台工人：用 SKIP LOCKED 认领 pending 读数并写入合格/超温结论。
+
+领单瞬间把该厢线的现行合格上限抄到读数行（limit_c 快照）；
+判定一律按快照走，处理中的单不受后续改档影响。
+"""
 
 import os
 import time
@@ -13,25 +17,27 @@ def claim_one(conn):
     with conn.transaction():
         row = conn.execute(
             """
-            SELECT id, probe_id, temp_c
-            FROM probe_readings
-            WHERE status = 'pending'
-            ORDER BY id
-            FOR UPDATE SKIP LOCKED
+            SELECT r.id, r.probe_id, r.temp_c, l.limit_c
+            FROM probe_readings r
+            JOIN lines l ON l.id = r.line_id
+            WHERE r.status = 'pending'
+            ORDER BY r.id
+            FOR UPDATE OF r SKIP LOCKED
             LIMIT 1
             """
         ).fetchone()
         if not row:
             return None
+        # 抄下领单当时的该厢线上限，后续改档不影响本单。
         conn.execute(
-            "UPDATE probe_readings SET status = 'processing' WHERE id = %s",
-            (row["id"],),
+            "UPDATE probe_readings SET status = 'processing', limit_c = %s WHERE id = %s",
+            (row["limit_c"], row["id"]),
         )
         return row
 
 
-def finish(conn, reading_id: int, temp_c: float) -> None:
-    verdict, reason = judge_temp(temp_c)
+def finish(conn, reading_id: int, temp_c: float, limit_c: float) -> None:
+    verdict, reason = judge_temp(temp_c, limit_c)
     conn.execute(
         """
         UPDATE probe_readings
@@ -48,7 +54,7 @@ def run_once(conn) -> bool:
     if not row:
         return False
     try:
-        finish(conn, row["id"], float(row["temp_c"]))
+        finish(conn, row["id"], float(row["temp_c"]), float(row["limit_c"]))
     except Exception:
         conn.execute(
             "UPDATE probe_readings SET status = 'pending' WHERE id = %s",
