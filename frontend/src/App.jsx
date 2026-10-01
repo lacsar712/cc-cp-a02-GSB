@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
+import { LimitsPage } from "./LimitsPage.jsx";
 
 const TOKEN_KEY = "coldchain_token";
 const USER_KEY = "coldchain_user";
@@ -17,6 +18,18 @@ function displayVerdict(row) {
   return "—";
 }
 
+function statusText(s) {
+  if (s === "pending") return "待处理";
+  if (s === "processing") return "处理中";
+  if (s === "done") return "已完成";
+  return s;
+}
+
+function fmtTemp(v) {
+  if (v === null || v === undefined) return "—";
+  return Number(v).toString();
+}
+
 export function App() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [user, setUser] = useState(() => {
@@ -26,9 +39,12 @@ export function App() {
       return null;
     }
   });
+  const [view, setView] = useState("overview");
   const [loginForm, setLoginForm] = useState({ username: "logger", password: "log123456" });
-  const [submitForm, setSubmitForm] = useState({ probe_id: "", temp_c: "" });
+  const [submitForm, setSubmitForm] = useState({ probe_id: "", line_id: "", temp_c: "" });
   const [rows, setRows] = useState([]);
+  const [lines, setLines] = useState([]);
+  const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
@@ -49,12 +65,46 @@ export function App() {
     setRows(await res.json());
   }, [token, authHeaders]);
 
+  const loadLines = useCallback(async () => {
+    if (!token) return;
+    const res = await fetch("/api/lines", { headers: authHeaders() });
+    if (res.ok) setLines(await res.json());
+  }, [token, authHeaders]);
+
+  const loadHistory = useCallback(async () => {
+    if (!token) return;
+    const res = await fetch("/api/lines/history", { headers: authHeaders() });
+    if (res.ok) setHistory(await res.json());
+  }, [token, authHeaders]);
+
+  const reloadLimits = useCallback(async () => {
+    await Promise.all([loadLines(), loadHistory()]);
+  }, [loadLines, loadHistory]);
+
   useEffect(() => {
+    if (!token) {
+      setView("overview");
+      return undefined;
+    }
     loadReadings();
-    if (!token) return undefined;
-    const t = setInterval(loadReadings, 3000);
+    loadLines();
+    const t = setInterval(() => {
+      loadReadings();
+      if (view === "limits") reloadLimits();
+    }, 3000);
     return () => clearInterval(t);
-  }, [loadReadings, token]);
+  }, [loadReadings, loadLines, reloadLimits, view, token]);
+
+  useEffect(() => {
+    if (view === "limits") reloadLimits();
+  }, [view, reloadLimits]);
+
+  // 厢线列表就绪后给提交表单一个默认厢线。
+  useEffect(() => {
+    if (!submitForm.line_id && lines.length > 0) {
+      setSubmitForm((f) => ({ ...f, line_id: lines[0].id }));
+    }
+  }, [lines, submitForm.line_id]);
 
   async function onLogin(e) {
     e.preventDefault();
@@ -89,6 +139,8 @@ export function App() {
     setToken(null);
     setUser(null);
     setRows([]);
+    setLines([]);
+    setHistory([]);
   }
 
   async function onSubmit(e) {
@@ -102,6 +154,7 @@ export function App() {
         headers: authHeaders(),
         body: JSON.stringify({
           probe_id: submitForm.probe_id,
+          line_id: submitForm.line_id,
           temp_c: parseFloat(submitForm.temp_c),
         }),
       });
@@ -111,7 +164,7 @@ export function App() {
         return;
       }
       setMsg(data.message || "已提交");
-      setSubmitForm({ probe_id: "", temp_c: "" });
+      setSubmitForm((f) => ({ probe_id: "", line_id: f.line_id, temp_c: "" }));
       await loadReadings();
     } finally {
       setLoading(false);
@@ -122,7 +175,7 @@ export function App() {
     return (
       <div class="wrap">
         <h1>冷链探头超温台</h1>
-        <p class="sub">记录员提交探头编号与摄氏温度，后台工人认领后判定合格或超温。</p>
+        <p class="sub">记录员按厢线提交探头编号与摄氏温度，后台工人领单时抄录该厢线现行上限后判定。</p>
         <div class="card">
           <form onSubmit={onLogin}>
             <div class="row">
@@ -166,7 +219,22 @@ export function App() {
       <div class="topbar">
         <div>
           <h1>冷链探头超温台</h1>
-          <p class="sub">温度不超过 8℃ 为合格，否则为超温。</p>
+          <nav class="nav">
+            <button
+              type="button"
+              class={view === "overview" ? "navbtn active" : "navbtn"}
+              onClick={() => setView("overview")}
+            >
+              总览
+            </button>
+            <button
+              type="button"
+              class={view === "limits" ? "navbtn active" : "navbtn"}
+              onClick={() => setView("limits")}
+            >
+              分线上限
+            </button>
+          </nav>
         </div>
         <div class="user">
           {user?.username}（{isWriter ? "记录员" : "值班员"}）
@@ -176,82 +244,114 @@ export function App() {
         </div>
       </div>
 
-      {isWriter && (
-        <div class="card">
-          <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>提交读数</h2>
-          <form onSubmit={onSubmit}>
-            <div class="row">
-              <label>
-                探头编号
-                <input
-                  required
-                  value={submitForm.probe_id}
-                  onInput={(e) =>
-                    setSubmitForm({ ...submitForm, probe_id: e.target.value })
-                  }
-                  placeholder="例如 探头C03"
-                />
-              </label>
-              <label>
-                温度（℃）
-                <input
-                  required
-                  type="number"
-                  step="0.1"
-                  value={submitForm.temp_c}
-                  onInput={(e) =>
-                    setSubmitForm({ ...submitForm, temp_c: e.target.value })
-                  }
-                />
-              </label>
-              <button type="submit" disabled={loading}>
-                提交
-              </button>
+      {view === "limits" ? (
+        <LimitsPage
+          lines={lines}
+          history={history}
+          isWriter={isWriter}
+          authHeaders={authHeaders}
+          reload={reloadLimits}
+        />
+      ) : (
+        <>
+          {isWriter && (
+            <div class="card">
+              <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>提交读数</h2>
+              <form onSubmit={onSubmit}>
+                <div class="row">
+                  <label>
+                    厢线
+                    <select
+                      required
+                      value={submitForm.line_id}
+                      onChange={(e) =>
+                        setSubmitForm({ ...submitForm, line_id: e.target.value })
+                      }
+                    >
+                      {lines.map((l) => (
+                        <option value={l.id}>
+                          {l.name}（上限 {fmtTemp(l.limit_c)}℃）
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    探头编号
+                    <input
+                      required
+                      value={submitForm.probe_id}
+                      onInput={(e) =>
+                        setSubmitForm({ ...submitForm, probe_id: e.target.value })
+                      }
+                      placeholder="例如 探头C03"
+                    />
+                  </label>
+                  <label>
+                    温度（℃）
+                    <input
+                      required
+                      type="number"
+                      step="0.1"
+                      value={submitForm.temp_c}
+                      onInput={(e) =>
+                        setSubmitForm({ ...submitForm, temp_c: e.target.value })
+                      }
+                    />
+                  </label>
+                  <button type="submit" disabled={loading}>
+                    提交
+                  </button>
+                </div>
+                {error && <p class="err">{error}</p>}
+                {msg && <p class="ok">{msg}</p>}
+              </form>
             </div>
-            {error && <p class="err">{error}</p>}
-            {msg && <p class="ok">{msg}</p>}
-          </form>
-        </div>
-      )}
+          )}
 
-      <div class="card">
-        <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>读数列表</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>编号</th>
-              <th>探头</th>
-              <th>温度℃</th>
-              <th>结论</th>
-              <th>说明</th>
-              <th>状态</th>
-              <th>提交人</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>{r.id}</td>
-                <td>{r.probe_id}</td>
-                <td>{r.temp_c}</td>
-                <td>
-                  <span class={verdictClass(r.verdict, r.status)}>
-                    {displayVerdict(r)}
-                  </span>
-                </td>
-                <td>{r.reason || "—"}</td>
-                <td>{r.status}</td>
-                <td>{r.created_by}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colspan="7">暂无数据</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          <div class="card">
+            <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>读数列表</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>编号</th>
+                  <th>厢线</th>
+                  <th>探头</th>
+                  <th>温度℃</th>
+                  <th>领单抄录上限℃</th>
+                  <th>结论</th>
+                  <th>说明</th>
+                  <th>状态</th>
+                  <th>提交人</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.id}</td>
+                    <td>{r.line_name ? `${r.line_name}（${r.line_id}）` : "—"}</td>
+                    <td>{r.probe_id}</td>
+                    <td>{fmtTemp(r.temp_c)}</td>
+                    <td>{r.status === "pending" ? "待领单" : fmtTemp(r.limit_c)}</td>
+                    <td>
+                      <span class={verdictClass(r.verdict, r.status)}>
+                        {displayVerdict(r)}
+                      </span>
+                    </td>
+                    <td>{r.reason || "—"}</td>
+                    <td>{statusText(r.status)}</td>
+                    <td>{r.created_by}</td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colspan="9">暂无数据</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }

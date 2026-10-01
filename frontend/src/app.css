@@ -50,11 +50,14 @@ label {
   font-size: 0.875rem;
 }
 
-input {
+input,
+select {
   padding: 0.5rem 0.65rem;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   min-width: 140px;
+  background: #fff;
+  font-size: 0.9rem;
 }
 
 button {
@@ -133,4 +136,37 @@ td {
 .user {
   font-size: 0.875rem;
   color: #475569;
+}
+
+.nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.navbtn {
+  padding: 0.35rem 0.9rem;
+  background: #e2e8f0;
+  color: #334155;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.navbtn.active {
+  background: #0369a1;
+  color: #fff;
+}
+
+.inline-edit {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.explain {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #334155;
+  font-size: 0.9rem;
+  line-height: 1.8;
 }
